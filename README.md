@@ -1,6 +1,6 @@
 ### kysely-bun-sql — Kysely Postgres dialect powered by Bun SQL
 
-[![CI](https://github.com/obsurvive/kysely-bun-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/obsurvive/kysely-bun-sql/actions/workflows/ci.yml)
+[![CI](https://github.com/lacion/kysely-bun-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/lacion/kysely-bun-sql/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/kysely-bun-sql.svg)](https://www.npmjs.com/package/kysely-bun-sql)
 ![bun](https://img.shields.io/badge/Bun-%3E%3D1.1.31-black?logo=bun)
 ![Kysely](https://img.shields.io/badge/Kysely-%3E%3D0.28-2596be)
