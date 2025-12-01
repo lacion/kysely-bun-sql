@@ -439,7 +439,8 @@ describe("BunPostgresDriver init() URL and clientOptions merging", () => {
 	test("config.url takes precedence over clientOptions.url", async () => {
 		const mockSQLInstance = createMockSQLInstance();
 		const configUrl = "postgres://primary:pass@primary-host:5432/primary_db";
-		const clientOptionsUrl = "postgres://secondary:pass@secondary-host:5432/secondary_db";
+		const clientOptionsUrl =
+			"postgres://secondary:pass@secondary-host:5432/secondary_db";
 
 		const driver = new BunPostgresDriver({
 			client: mockSQLInstance as unknown as SQL,
@@ -533,7 +534,10 @@ describe("BunPostgresDriver init() SQL constructor arguments (via subclass)", ()
 	function simulateInitArgs(config: {
 		url?: string;
 		clientOptions?: Record<string, unknown>;
-	}): { type: "url-string"; value: string } | { type: "options"; value: Record<string, unknown> } | { type: "empty" } {
+	}):
+		| { type: "url-string"; value: string }
+		| { type: "options"; value: Record<string, unknown> }
+		| { type: "empty" } {
 		if (config.url) {
 			if (config.clientOptions) {
 				// Simulate the merging logic from driver.ts
@@ -580,8 +584,12 @@ describe("BunPostgresDriver init() SQL constructor arguments (via subclass)", ()
 			value: { url: configUrl, max: 15, bigint: true },
 		});
 		// Verify clientOptions.url was excluded
-		expect((result as { value: Record<string, unknown> }).value.url).toBe(configUrl);
-		expect((result as { value: Record<string, unknown> }).value.url).not.toBe(clientOptionsUrl);
+		expect((result as { value: Record<string, unknown> }).value.url).toBe(
+			configUrl,
+		);
+		expect((result as { value: Record<string, unknown> }).value.url).not.toBe(
+			clientOptionsUrl,
+		);
 	});
 
 	test("clientOptions only (no url) includes clientOptions.url", () => {
@@ -597,7 +605,9 @@ describe("BunPostgresDriver init() SQL constructor arguments (via subclass)", ()
 			value: clientOptions,
 		});
 		// Verify clientOptions.url IS included when config.url is not set
-		expect((result as { value: Record<string, unknown> }).value.url).toBe(clientOptions.url);
+		expect((result as { value: Record<string, unknown> }).value.url).toBe(
+			clientOptions.url,
+		);
 	});
 
 	test("no url or clientOptions creates empty constructor call", () => {
@@ -617,7 +627,7 @@ describe("BunPostgresDriver init() SQL constructor arguments (via subclass)", ()
 		const result = simulateInitArgs({ url: testUrl, clientOptions });
 
 		const expected = {
-			type: "options",
+			type: "options" as const,
 			value: {
 				url: testUrl,
 				max: 50,
@@ -639,7 +649,7 @@ describe("BunPostgresDriver init() SQL constructor arguments (via subclass)", ()
 		const result = simulateInitArgs({ url: testUrl, clientOptions });
 
 		const expected = {
-			type: "options",
+			type: "options" as const,
 			value: {
 				url: testUrl,
 				prepare: false,
