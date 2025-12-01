@@ -1,6 +1,6 @@
 {
 	"name": "kysely-bun-sql",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "Kysely dialect/driver for PostgreSQL using Bun's native SQL",
 	"type": "module",
 	"main": "dist/index.js",
