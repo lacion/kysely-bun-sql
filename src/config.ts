@@ -22,7 +22,21 @@ export interface BunPostgresDialectConfig {
 	clientOptions?: BunSqlClientOptions;
 
 	/**
-	 * Called once when a reserved connection is created (first use of the connection).
+	 * Called once when a new underlying database connection is first used.
+	 *
+	 * The driver tracks connections by their PostgreSQL backend process ID
+	 * (`pg_backend_pid()`) to ensure this callback is invoked only once per
+	 * actual database connection, not on every `reserve()` call.
+	 *
+	 * Note: This adds a small overhead (one `SELECT pg_backend_pid()` query)
+	 * on each connection acquisition when this callback is configured.
+	 *
+	 * @example
+	 * ```ts
+	 * onCreateConnection: async (connection) => {
+	 *   await connection.executeQuery(CompiledQuery.raw("SET timezone = 'UTC'"));
+	 * }
+	 * ```
 	 */
 	onCreateConnection?: (connection: DatabaseConnection) => Promise<void>;
 
