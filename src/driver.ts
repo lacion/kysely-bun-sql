@@ -20,13 +20,37 @@ interface BunSqlResult<T> extends Array<T> {
 	command?: string;
 }
 
+/** Default connection TTL: 1 hour (in milliseconds) */
+const DEFAULT_CONNECTION_TTL_MS = 3600 * 1000;
+
+/** Minimum interval between prune operations (in milliseconds) */
+const PRUNE_INTERVAL_MS = 60_000;
+
 export class BunPostgresDriver implements Driver {
 	readonly #config: BunPostgresDialectConfig;
-	readonly #connections = new WeakMap<ReservedClient, BunPostgresConnection>();
 	#client!: SQL;
+
+	/**
+	 * Tracks initialized connections by their PostgreSQL backend PID.
+	 * Maps PID -> timestamp of last seen activity.
+	 * Used to ensure onCreateConnection is called only once per underlying connection.
+	 */
+	readonly #initializedPids = new Map<number, number>();
+
+	/** Timestamp of last prune operation */
+	#lastPruneTime = 0;
+
+	/** Connection TTL in milliseconds - entries older than this are considered stale */
+	readonly #connectionTtlMs: number;
 
 	constructor(config: BunPostgresDialectConfig = {}) {
 		this.#config = { ...config };
+		// Use maxLifetime from clientOptions if provided, otherwise default to 1 hour
+		const maxLifetimeSec = config.clientOptions?.maxLifetime;
+		this.#connectionTtlMs =
+			maxLifetimeSec !== undefined
+				? maxLifetimeSec * 1000
+				: DEFAULT_CONNECTION_TTL_MS;
 	}
 
 	async init(): Promise<void> {
@@ -48,19 +72,56 @@ export class BunPostgresDriver implements Driver {
 		}
 	}
 
+	/**
+	 * Removes stale PID entries that are older than the connection TTL.
+	 * Called lazily during acquireConnection to avoid timer overhead.
+	 */
+	#pruneStaleConnections(): void {
+		const now = Date.now();
+
+		// Only prune if enough time has passed since last prune
+		if (now - this.#lastPruneTime < PRUNE_INTERVAL_MS) {
+			return;
+		}
+
+		this.#lastPruneTime = now;
+
+		for (const [pid, timestamp] of this.#initializedPids) {
+			if (now - timestamp > this.#connectionTtlMs) {
+				this.#initializedPids.delete(pid);
+			}
+		}
+	}
+
 	async acquireConnection(): Promise<DatabaseConnection> {
 		const reserved = (await this.#client.reserve()) as ReservedClient;
+		const connection = new BunPostgresConnection(reserved);
 
-		// Check if we already have a connection wrapper for this reserved client
-		let connection = this.#connections.get(reserved);
+		// Only track PIDs and call onCreateConnection if the callback is configured
+		if (this.#config.onCreateConnection) {
+			// Lazily prune stale connection tracking entries
+			this.#pruneStaleConnections();
 
-		if (!connection) {
-			// This is a new connection - create wrapper and call onCreateConnection
-			connection = new BunPostgresConnection(reserved);
-			this.#connections.set(reserved, connection);
+			// Query PostgreSQL for the backend process ID to uniquely identify this connection
+			const result = await reserved.unsafe("SELECT pg_backend_pid() AS pid");
+			const pid = (result[0] as { pid: number }).pid;
+			const now = Date.now();
 
-			if (this.#config.onCreateConnection) {
+			const existingTimestamp = this.#initializedPids.get(pid);
+
+			// Consider it a "new" connection if:
+			// 1. We haven't seen this PID before, OR
+			// 2. The tracked entry is older than TTL (connection was recycled, PID reused)
+			const isNewConnection =
+				existingTimestamp === undefined ||
+				now - existingTimestamp > this.#connectionTtlMs;
+
+			if (isNewConnection) {
+				this.#initializedPids.set(pid, now);
 				await this.#config.onCreateConnection(connection);
+			} else {
+				// Refresh timestamp - connection is still alive
+				this.#initializedPids.set(pid, now);
 			}
 		}
 
@@ -86,6 +147,7 @@ export class BunPostgresDriver implements Driver {
 	}
 
 	async destroy(): Promise<void> {
+		this.#initializedPids.clear();
 		await this.#client.close(this.#config.closeOptions);
 	}
 }
