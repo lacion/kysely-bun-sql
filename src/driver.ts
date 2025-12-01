@@ -4,6 +4,7 @@ import {
 	type DatabaseConnection,
 	type Driver,
 	type QueryResult,
+	type TransactionSettings,
 } from "kysely";
 import type { BunPostgresDialectConfig } from "./config.ts";
 
@@ -47,8 +48,22 @@ export class BunPostgresDriver implements Driver {
 		return connection;
 	}
 
-	async beginTransaction(connection: DatabaseConnection): Promise<void> {
-		await connection.executeQuery(CompiledQuery.raw("begin"));
+	async beginTransaction(
+		connection: DatabaseConnection,
+		settings: TransactionSettings,
+	): Promise<void> {
+		if (settings.isolationLevel || settings.accessMode) {
+			let sql = "start transaction";
+			if (settings.isolationLevel) {
+				sql += ` isolation level ${settings.isolationLevel}`;
+			}
+			if (settings.accessMode) {
+				sql += ` ${settings.accessMode}`;
+			}
+			await connection.executeQuery(CompiledQuery.raw(sql));
+		} else {
+			await connection.executeQuery(CompiledQuery.raw("begin"));
+		}
 	}
 
 	async commitTransaction(connection: DatabaseConnection): Promise<void> {
