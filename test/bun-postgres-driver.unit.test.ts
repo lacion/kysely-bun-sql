@@ -153,7 +153,7 @@ describe("BunPostgresDriver (unit)", () => {
 		await driver.init();
 		const conn = await driver.acquireConnection();
 
-		await driver.beginTransaction(conn);
+		await driver.beginTransaction(conn, {});
 		await driver.commitTransaction(conn);
 		await driver.rollbackTransaction(conn);
 
@@ -161,6 +161,65 @@ describe("BunPostgresDriver (unit)", () => {
 			(c) => (c as unknown as [string])[0],
 		);
 		expect(calledSql).toEqual(["begin", "commit", "rollback"]);
+
+		await driver.releaseConnection(conn);
+	});
+
+	test("transaction with isolation level and access mode", async () => {
+		const { client, unsafe } = createStubClient();
+		const driver = new BunPostgresDriver({ client: client as unknown as SQL });
+		await driver.init();
+		const conn = await driver.acquireConnection();
+
+		await driver.beginTransaction(conn, {
+			isolationLevel: "serializable",
+			accessMode: "read only",
+		});
+
+		const calledSql = unsafe.mock.calls.map(
+			(c) => (c as unknown as [string])[0],
+		);
+		expect(calledSql).toEqual([
+			"start transaction isolation level serializable read only",
+		]);
+
+		await driver.releaseConnection(conn);
+	});
+
+	test("transaction with only isolation level", async () => {
+		const { client, unsafe } = createStubClient();
+		const driver = new BunPostgresDriver({ client: client as unknown as SQL });
+		await driver.init();
+		const conn = await driver.acquireConnection();
+
+		await driver.beginTransaction(conn, {
+			isolationLevel: "serializable",
+		});
+
+		const calledSql = unsafe.mock.calls.map(
+			(c) => (c as unknown as [string])[0],
+		);
+		expect(calledSql).toEqual([
+			"start transaction isolation level serializable",
+		]);
+
+		await driver.releaseConnection(conn);
+	});
+
+	test("transaction with only access mode", async () => {
+		const { client, unsafe } = createStubClient();
+		const driver = new BunPostgresDriver({ client: client as unknown as SQL });
+		await driver.init();
+		const conn = await driver.acquireConnection();
+
+		await driver.beginTransaction(conn, {
+			accessMode: "read only",
+		});
+
+		const calledSql = unsafe.mock.calls.map(
+			(c) => (c as unknown as [string])[0],
+		);
+		expect(calledSql).toEqual(["start transaction read only"]);
 
 		await driver.releaseConnection(conn);
 	});
