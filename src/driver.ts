@@ -24,7 +24,15 @@ export class BunPostgresDriver implements Driver {
 		}
 
 		if (this.#config.url) {
-			this.#client = new SQL(this.#config.url);
+			// Merge URL with clientOptions if both are provided
+			if (this.#config.clientOptions) {
+				this.#client = new SQL({
+					url: this.#config.url,
+					...this.#config.clientOptions,
+				});
+			} else {
+				this.#client = new SQL(this.#config.url);
+			}
 		} else {
 			// Use default environment-based configuration; defaults to Postgres when not MySQL/SQLite
 			if (this.#config.clientOptions) {

@@ -34,6 +34,7 @@ export interface BunPostgresDialectConfig {
 
 /** Minimal subset of Bun SQL constructor options we support/document. */
 export interface BunSqlClientOptions {
+	/** Connection URL - can also be set via BunPostgresDialectConfig.url */
 	url?: string;
 	hostname?: string;
 	port?: number;
@@ -41,13 +42,20 @@ export interface BunSqlClientOptions {
 	username?: string;
 	password?: string | (() => string | Promise<string>);
 	// Pool
+	/** Maximum number of connections in the pool @default 10 */
 	max?: number;
+	/** Maximum time in seconds to wait for connection to become available @default 0 */
 	idleTimeout?: number;
+	/** Maximum lifetime in seconds of a connection @default 0 */
 	maxLifetime?: number;
+	/** Maximum time in seconds to wait when establishing a connection @default 30 */
 	connectionTimeout?: number;
 	// Behavior
+	/** Automatic creation of prepared statements @default true */
 	prepare?: boolean;
+	/** Return values outside i32 range as BigInts @default false */
 	bigint?: boolean;
+	/** TLS/SSL configuration for the connection */
 	tls?: boolean | Record<string, unknown>;
 	// Callbacks (typed loosely to avoid importing Bun internals)
 	onconnect?: (client: unknown) => void;
