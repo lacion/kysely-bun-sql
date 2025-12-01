@@ -22,7 +22,21 @@ export interface BunPostgresDialectConfig {
 	clientOptions?: BunSqlClientOptions;
 
 	/**
-	 * Called once when a reserved connection is created (first use of the connection).
+	 * Called once when a new underlying database connection is first used.
+	 *
+	 * The driver tracks connections by their PostgreSQL backend process ID
+	 * (`pg_backend_pid()`) to ensure this callback is invoked only once per
+	 * actual database connection, not on every `reserve()` call.
+	 *
+	 * Note: This adds a small overhead (one `SELECT pg_backend_pid()` query)
+	 * on each connection acquisition when this callback is configured.
+	 *
+	 * @example
+	 * ```ts
+	 * onCreateConnection: async (connection) => {
+	 *   await connection.executeQuery(CompiledQuery.raw("SET timezone = 'UTC'"));
+	 * }
+	 * ```
 	 */
 	onCreateConnection?: (connection: DatabaseConnection) => Promise<void>;
 
@@ -34,6 +48,11 @@ export interface BunPostgresDialectConfig {
 
 /** Minimal subset of Bun SQL constructor options we support/document. */
 export interface BunSqlClientOptions {
+	/**
+	 * Connection URL - can also be set via BunPostgresDialectConfig.url.
+	 * Note: If both config.url and clientOptions.url are provided,
+	 * config.url takes precedence.
+	 */
 	url?: string;
 	hostname?: string;
 	port?: number;
@@ -41,13 +60,20 @@ export interface BunSqlClientOptions {
 	username?: string;
 	password?: string | (() => string | Promise<string>);
 	// Pool
+	/** Maximum number of connections in the pool @default 10 */
 	max?: number;
+	/** Maximum idle time in seconds before a connection is closed @default 0 (no limit) */
 	idleTimeout?: number;
+	/** Maximum lifetime in seconds of a connection before it's closed and recreated @default 0 (no limit) */
 	maxLifetime?: number;
+	/** Maximum time in seconds to wait when establishing a connection @default 30 */
 	connectionTimeout?: number;
 	// Behavior
+	/** Automatic creation of prepared statements @default true */
 	prepare?: boolean;
+	/** Return values outside i32 range as BigInts @default false */
 	bigint?: boolean;
+	/** TLS/SSL configuration for the connection */
 	tls?: boolean | Record<string, unknown>;
 	// Callbacks (typed loosely to avoid importing Bun internals)
 	onconnect?: (client: unknown) => void;

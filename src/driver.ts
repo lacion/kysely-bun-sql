@@ -6,16 +6,102 @@ import {
 	type QueryResult,
 	type TransactionSettings,
 } from "kysely";
-import type { BunPostgresDialectConfig } from "./config.ts";
+import type {
+	BunPostgresDialectConfig,
+	BunSqlClientOptions,
+} from "./config.ts";
 
 type ReservedClient = SQL & { release: () => void };
+
+/**
+ * Resolved SQL constructor arguments based on the dialect configuration.
+ * Used internally by the driver and exported for testing.
+ */
+export type SqlConstructorArgs =
+	| { type: "url-string"; value: string }
+	| { type: "options"; value: BunSqlClientOptions }
+	| { type: "empty" };
+
+/**
+ * Resolves the SQL constructor arguments from the dialect configuration.
+ * This function encapsulates the merging logic for url and clientOptions.
+ *
+ * @param config - The dialect configuration (without the client property)
+ * @returns The resolved arguments to pass to the SQL constructor
+ *
+ * @remarks
+ * - If `config.url` is provided with `clientOptions`, they are merged with
+ *   `config.url` taking precedence over `clientOptions.url`
+ * - If only `config.url` is provided, the URL string is returned directly
+ * - If only `clientOptions` is provided, it's returned as-is (including any url)
+ * - If neither is provided, returns empty to use environment-based defaults
+ */
+export function resolveSqlConstructorArgs(config: {
+	url?: string;
+	clientOptions?: BunSqlClientOptions;
+}): SqlConstructorArgs {
+	if (config.url) {
+		if (config.clientOptions) {
+			// Merge URL with clientOptions, excluding clientOptions.url
+			// to ensure config.url takes precedence
+			const { url: _ignoredUrl, ...restClientOptions } = config.clientOptions;
+			return {
+				type: "options",
+				value: { url: config.url, ...restClientOptions },
+			};
+		}
+		return { type: "url-string", value: config.url };
+	}
+
+	if (config.clientOptions) {
+		return { type: "options", value: { ...config.clientOptions } };
+	}
+
+	return { type: "empty" };
+}
+
+/**
+ * Bun SQL result array with additional metadata properties.
+ * The result is an array with extra properties attached (count, command, etc.)
+ */
+interface BunSqlResult<T> extends Array<T> {
+	/** Number of rows affected by the query (for INSERT/UPDATE/DELETE) */
+	count?: number;
+	/** The SQL command that was executed (INSERT, UPDATE, DELETE, SELECT, etc.) */
+	command?: string;
+}
+
+/** Default connection TTL: 1 hour (in milliseconds) */
+const DEFAULT_CONNECTION_TTL_MS = 3600 * 1000;
+
+/** Minimum interval between prune operations (in milliseconds) */
+const PRUNE_INTERVAL_MS = 60_000;
 
 export class BunPostgresDriver implements Driver {
 	readonly #config: BunPostgresDialectConfig;
 	#client!: SQL;
 
+	/**
+	 * Tracks initialized connections by their PostgreSQL backend PID.
+	 * Maps PID -> timestamp of last seen activity.
+	 * Used to ensure onCreateConnection is called only once per underlying connection.
+	 */
+	readonly #initializedPids = new Map<number, number>();
+
+	/** Timestamp of last prune operation */
+	#lastPruneTime = 0;
+
+	/** Connection TTL in milliseconds - entries older than this are considered stale */
+	readonly #connectionTtlMs: number;
+
 	constructor(config: BunPostgresDialectConfig = {}) {
 		this.#config = { ...config };
+		// Use maxLifetime from clientOptions if provided, otherwise default to 1 hour
+		const maxLifetimeSec = config.clientOptions?.maxLifetime;
+		this.#connectionTtlMs =
+			maxLifetimeSec !== undefined
+				? maxLifetimeSec * 1000
+				: DEFAULT_CONNECTION_TTL_MS;
 	}
 
 	async init(): Promise<void> {
@@ -24,15 +110,41 @@ export class BunPostgresDriver implements Driver {
 			return;
 		}
 
-		if (this.#config.url) {
-			this.#client = new SQL(this.#config.url);
-		} else {
-			// Use default environment-based configuration; defaults to Postgres when not MySQL/SQLite
-			if (this.#config.clientOptions) {
-				// allow configuring pool, prepare, bigint, tls, etc.
-				this.#client = new SQL({ ...this.#config.clientOptions });
-			} else {
+		const args = resolveSqlConstructorArgs({
+			url: this.#config.url,
+			clientOptions: this.#config.clientOptions,
+		});
+
+		switch (args.type) {
+			case "url-string":
+				this.#client = new SQL(args.value);
+				break;
+			case "options":
+				this.#client = new SQL(args.value);
+				break;
+			case "empty":
 				this.#client = new SQL();
+				break;
+		}
+	}
+
+	/**
+	 * Removes stale PID entries that are older than the connection TTL.
+	 * Called lazily during acquireConnection to avoid timer overhead.
+	 */
+	#pruneStaleConnections(): void {
+		const now = Date.now();
+
+		// Only prune if enough time has passed since last prune
+		if (now - this.#lastPruneTime < PRUNE_INTERVAL_MS) {
+			return;
+		}
+
+		this.#lastPruneTime = now;
+
+		for (const [pid, timestamp] of this.#initializedPids) {
+			if (now - timestamp > this.#connectionTtlMs) {
+				this.#initializedPids.delete(pid);
 			}
 		}
 	}
@@ -41,8 +153,41 @@ export class BunPostgresDriver implements Driver {
 		const reserved = (await this.#client.reserve()) as ReservedClient;
 		const connection = new BunPostgresConnection(reserved);
 
+		// Only track PIDs and call onCreateConnection if the callback is configured
 		if (this.#config.onCreateConnection) {
-			await this.#config.onCreateConnection(connection);
+			// Lazily prune stale connection tracking entries
+			this.#pruneStaleConnections();
+
+			// Query PostgreSQL for the backend process ID to uniquely identify this connection
+			const result = await reserved.unsafe("SELECT pg_backend_pid() AS pid");
+			const row = result?.[0] as { pid: number } | undefined;
+			const pid = row?.pid;
+
+			if (typeof pid !== "number") {
+				throw new Error(
+					"Failed to retrieve PostgreSQL backend PID. " +
+						"Ensure you are connected to a PostgreSQL database.",
+				);
+			}
+
+			const now = Date.now();
+
+			const existingTimestamp = this.#initializedPids.get(pid);
+
+			// Consider it a "new" connection if:
+			// 1. We haven't seen this PID before, OR
+			// 2. The tracked entry is older than TTL (connection was recycled, PID reused)
+			const isNewConnection =
+				existingTimestamp === undefined ||
+				now - existingTimestamp > this.#connectionTtlMs;
+
+			if (isNewConnection) {
+				this.#initializedPids.set(pid, now);
+				await this.#config.onCreateConnection(connection);
+			} else {
+				// Refresh timestamp - connection is still alive
+				this.#initializedPids.set(pid, now);
+			}
 		}
 
 		return connection;
@@ -81,6 +226,7 @@ export class BunPostgresDriver implements Driver {
 	}
 
 	async destroy(): Promise<void> {
+		this.#initializedPids.clear();
 		await this.#client.close(this.#config.closeOptions);
 	}
 }
@@ -100,12 +246,30 @@ class BunPostgresConnection implements DatabaseConnection {
 		const { sql, parameters } = compiledQuery;
 
 		// Use unsafe to execute the compiled SQL with $1-style bindings
-		const rows = (await this.#client.unsafe(
+		// Bun SQL returns an array with additional properties (count, command)
+		const result = (await this.#client.unsafe(
 			sql,
 			parameters as unknown[],
-		)) as O[];
+		)) as BunSqlResult<O>;
 
-		return { rows };
+		// Extract the command type and count from Bun's result
+		const command = result.command;
+		const count = result.count;
+
+		// Return numAffectedRows for INSERT, UPDATE, DELETE, MERGE operations
+		const numAffectedRows =
+			(command === "INSERT" ||
+				command === "UPDATE" ||
+				command === "DELETE" ||
+				command === "MERGE") &&
+			count !== undefined
+				? BigInt(count)
+				: undefined;
+
+		return {
+			numAffectedRows,
+			rows: [...result], // Convert to plain array
+		};
 	}
 
 	async *streamQuery<R>(
