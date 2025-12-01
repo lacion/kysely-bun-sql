@@ -59,6 +59,81 @@ describe("BunPostgresDriver (unit)", () => {
 		await driver.releaseConnection(conn);
 	});
 
+	test("executeQuery returns numAffectedRows for INSERT/UPDATE/DELETE", async () => {
+		// Create a mock that returns an array with count and command properties
+		const createResultArray = (rows: unknown[], command: string, count: number) => {
+			const arr = [...rows] as unknown[] & { command?: string; count?: number };
+			arr.command = command;
+			arr.count = count;
+			return arr;
+		};
+
+		const unsafe = mock(async () => createResultArray([], "INSERT", 3));
+		const release = mock(() => {});
+		const reserved: { unsafe: typeof unsafe; release: () => void } = {
+			unsafe,
+			release,
+		};
+		const close = mock(async () => {});
+		const reserve = mock(async () => reserved);
+		const client: {
+			reserve: () => Promise<typeof reserved>;
+			close: () => Promise<void>;
+		} = {
+			reserve,
+			close,
+		};
+
+		const driver = new BunPostgresDriver({ client: client as unknown as SQL });
+		await driver.init();
+		const conn = await driver.acquireConnection();
+
+		const cq = CompiledQuery.raw("insert into users (name) values ($1)", ["Alice"]);
+		const result = await conn.executeQuery(cq);
+
+		expect(result.numAffectedRows).toBe(BigInt(3));
+		expect(result.rows).toEqual([]);
+
+		await driver.releaseConnection(conn);
+	});
+
+	test("executeQuery does not return numAffectedRows for SELECT", async () => {
+		const createResultArray = (rows: unknown[], command: string, count: number) => {
+			const arr = [...rows] as unknown[] & { command?: string; count?: number };
+			arr.command = command;
+			arr.count = count;
+			return arr;
+		};
+
+		const unsafe = mock(async () => createResultArray([{ id: 1 }], "SELECT", 1));
+		const release = mock(() => {});
+		const reserved: { unsafe: typeof unsafe; release: () => void } = {
+			unsafe,
+			release,
+		};
+		const close = mock(async () => {});
+		const reserve = mock(async () => reserved);
+		const client: {
+			reserve: () => Promise<typeof reserved>;
+			close: () => Promise<void>;
+		} = {
+			reserve,
+			close,
+		};
+
+		const driver = new BunPostgresDriver({ client: client as unknown as SQL });
+		await driver.init();
+		const conn = await driver.acquireConnection();
+
+		const cq = CompiledQuery.raw("select * from users", []);
+		const result = await conn.executeQuery(cq);
+
+		expect(result.numAffectedRows).toBeUndefined();
+		expect(result.rows).toEqual([{ id: 1 }]);
+
+		await driver.releaseConnection(conn);
+	});
+
 	test("transaction commands are executed", async () => {
 		const { client, unsafe } = createStubClient();
 		const driver = new BunPostgresDriver({ client: client as unknown as SQL });
