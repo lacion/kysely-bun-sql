@@ -48,7 +48,11 @@ export interface BunPostgresDialectConfig {
 
 /** Minimal subset of Bun SQL constructor options we support/document. */
 export interface BunSqlClientOptions {
-	/** Connection URL - can also be set via BunPostgresDialectConfig.url */
+	/**
+	 * Connection URL - can also be set via BunPostgresDialectConfig.url.
+	 * Note: If both config.url and clientOptions.url are provided,
+	 * config.url takes precedence.
+	 */
 	url?: string;
 	hostname?: string;
 	port?: number;

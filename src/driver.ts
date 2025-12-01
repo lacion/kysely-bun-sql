@@ -61,10 +61,13 @@ export class BunPostgresDriver implements Driver {
 
 		if (this.#config.url) {
 			// Merge URL with clientOptions if both are provided
+			// Exclude clientOptions.url to ensure config.url takes precedence
 			if (this.#config.clientOptions) {
+				const { url: _ignoredUrl, ...restClientOptions } =
+					this.#config.clientOptions;
 				this.#client = new SQL({
 					url: this.#config.url,
-					...this.#config.clientOptions,
+					...restClientOptions,
 				});
 			} else {
 				this.#client = new SQL(this.#config.url);
