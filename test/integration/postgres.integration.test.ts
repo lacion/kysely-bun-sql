@@ -70,18 +70,25 @@ describe.if(hasDb)("BunPostgresDialect (integration)", () => {
 
 	test("introspector lists our table and columns", async () => {
 		const dialect = new BunPostgresDialect();
+		// biome-ignore lint/suspicious/noExplicitAny: Kysely generic type mismatch in test
 		const introspector = dialect.createIntrospector(db as any);
 		const tables = await introspector.getTables();
+		// biome-ignore lint/suspicious/noExplicitAny: Table metadata type is internal
 		const usersTable = tables.find((t: any) => t.name === table);
 		expect(usersTable).toBeDefined();
-		const cols = usersTable!.columns.map((c: any) => c.name);
+		// biome-ignore lint/suspicious/noExplicitAny: Column metadata type is internal
+		const cols = usersTable?.columns.map((c: any) => c.name);
 		expect(cols).toEqual(expect.arrayContaining(["id", "name"]));
 	});
 
 	test.if(!!process.env.DATABASE_URL)(
 		"bigint handling with custom client",
 		async () => {
-			const url = process.env.DATABASE_URL!;
+			const url = process.env.DATABASE_URL;
+			if (!url) {
+				throw new Error("DATABASE_URL is required for this test");
+			}
+			// biome-ignore lint/suspicious/noExplicitAny: Bun SQL options type is not fully typed
 			const client = new SQL({ url, bigint: true } as any);
 			const db2 = new Kysely<DB>({
 				dialect: new BunPostgresDialect({ client }),
@@ -207,10 +214,99 @@ describe.if(hasDb)("BunPostgresDialect (integration)", () => {
 		expect(names).toContain("Outer2");
 		expect(names).not.toContain("Inner");
 	});
-});
 
-describe.if(!hasDb)("Integration skipped", () => {
-	test("skipped due to missing DATABASE_URL", () => {
-		expect(process.env.DATABASE_URL).toBeUndefined();
+	// ==================== numAffectedRows Tests ====================
+
+	test("numAffectedRows returns correct count for single INSERT", async () => {
+		const result = await db
+			.insertInto(table)
+			.values({ name: "SingleInsert" })
+			.executeTakeFirst();
+
+		expect(result.numInsertedOrUpdatedRows).toBe(BigInt(1));
+	});
+
+	test("numAffectedRows returns correct count for bulk INSERT", async () => {
+		const result = await db
+			.insertInto(table)
+			.values([
+				{ name: "Bulk1" },
+				{ name: "Bulk2" },
+				{ name: "Bulk3" },
+				{ name: "Bulk4" },
+				{ name: "Bulk5" },
+			])
+			.executeTakeFirst();
+
+		expect(result.numInsertedOrUpdatedRows).toBe(BigInt(5));
+	});
+
+	test("numAffectedRows returns correct count for UPDATE with matching rows", async () => {
+		// Insert some rows first (using unique suffixes to avoid constraint violation)
+		await db
+			.insertInto(table)
+			.values([
+				{ name: "ToUpdate_A" },
+				{ name: "ToUpdate_B" },
+				{ name: "OtherRow" },
+			])
+			.execute();
+
+		// Update with a pattern that appends to existing name to keep uniqueness
+		const result = await db
+			.updateTable(table)
+			.set({ name: ksql`name || '_updated'` })
+			.where("name", "like", "ToUpdate%")
+			.executeTakeFirst();
+
+		expect(result.numUpdatedRows).toBe(BigInt(2));
+	});
+
+	test("numAffectedRows returns 0 for UPDATE with no matching rows", async () => {
+		await db.insertInto(table).values({ name: "Existing" }).execute();
+
+		const result = await db
+			.updateTable(table)
+			.set({ name: "Updated" })
+			.where("name", "=", "NonExistent")
+			.executeTakeFirst();
+
+		expect(result.numUpdatedRows).toBe(BigInt(0));
+	});
+
+	test("numAffectedRows returns correct count for DELETE", async () => {
+		// Insert some rows first
+		await db
+			.insertInto(table)
+			.values([
+				{ name: "ToDelete1" },
+				{ name: "ToDelete2" },
+				{ name: "ToDelete3" },
+				{ name: "Keep" },
+			])
+			.execute();
+
+		const result = await db
+			.deleteFrom(table)
+			.where("name", "like", "ToDelete%")
+			.executeTakeFirst();
+
+		expect(result.numDeletedRows).toBe(BigInt(3));
+
+		// Verify the "Keep" row still exists
+		const remaining = await db.selectFrom(table).selectAll().execute();
+		expect(remaining.map((r) => r.name)).toContain("Keep");
+	});
+
+	test("numAffectedRows returns 0 for DELETE with no matching rows", async () => {
+		await db.insertInto(table).values({ name: "Existing" }).execute();
+
+		const result = await db
+			.deleteFrom(table)
+			.where("name", "=", "NonExistent")
+			.executeTakeFirst();
+
+		expect(result.numDeletedRows).toBe(BigInt(0));
 	});
 });
+
