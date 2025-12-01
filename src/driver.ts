@@ -9,6 +9,17 @@ import type { BunPostgresDialectConfig } from "./config.ts";
 
 type ReservedClient = SQL & { release: () => void };
 
+/**
+ * Bun SQL result array with additional metadata properties.
+ * The result is an array with extra properties attached (count, command, etc.)
+ */
+interface BunSqlResult<T> extends Array<T> {
+	/** Number of rows affected by the query (for INSERT/UPDATE/DELETE) */
+	count?: number;
+	/** The SQL command that was executed (INSERT, UPDATE, DELETE, SELECT, etc.) */
+	command?: string;
+}
+
 export class BunPostgresDriver implements Driver {
 	readonly #config: BunPostgresDialectConfig;
 	#client!: SQL;
@@ -85,12 +96,30 @@ class BunPostgresConnection implements DatabaseConnection {
 		const { sql, parameters } = compiledQuery;
 
 		// Use unsafe to execute the compiled SQL with $1-style bindings
-		const rows = (await this.#client.unsafe(
+		// Bun SQL returns an array with additional properties (count, command)
+		const result = (await this.#client.unsafe(
 			sql,
 			parameters as unknown[],
-		)) as O[];
+		)) as BunSqlResult<O>;
 
-		return { rows };
+		// Extract the command type and count from Bun's result
+		const command = result.command;
+		const count = result.count;
+
+		// Return numAffectedRows for INSERT, UPDATE, DELETE, MERGE operations
+		const numAffectedRows =
+			(command === "INSERT" ||
+				command === "UPDATE" ||
+				command === "DELETE" ||
+				command === "MERGE") &&
+			count !== undefined
+				? BigInt(count)
+				: undefined;
+
+		return {
+			numAffectedRows,
+			rows: [...result], // Convert to plain array
+		};
 	}
 
 	async *streamQuery<R>(
