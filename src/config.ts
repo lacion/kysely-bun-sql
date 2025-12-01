@@ -62,9 +62,9 @@ export interface BunSqlClientOptions {
 	// Pool
 	/** Maximum number of connections in the pool @default 10 */
 	max?: number;
-	/** Maximum time in seconds to wait for connection to become available @default 0 */
+	/** Maximum idle time in seconds before a connection is closed @default 0 (no limit) */
 	idleTimeout?: number;
-	/** Maximum lifetime in seconds of a connection @default 0 */
+	/** Maximum lifetime in seconds of a connection before it's closed and recreated @default 0 (no limit) */
 	maxLifetime?: number;
 	/** Maximum time in seconds to wait when establishing a connection @default 30 */
 	connectionTimeout?: number;

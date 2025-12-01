@@ -5,9 +5,59 @@ import {
 	type Driver,
 	type QueryResult,
 } from "kysely";
-import type { BunPostgresDialectConfig } from "./config.ts";
+import type {
+	BunPostgresDialectConfig,
+	BunSqlClientOptions,
+} from "./config.ts";
 
 type ReservedClient = SQL & { release: () => void };
+
+/**
+ * Resolved SQL constructor arguments based on the dialect configuration.
+ * Used internally by the driver and exported for testing.
+ */
+export type SqlConstructorArgs =
+	| { type: "url-string"; value: string }
+	| { type: "options"; value: BunSqlClientOptions }
+	| { type: "empty" };
+
+/**
+ * Resolves the SQL constructor arguments from the dialect configuration.
+ * This function encapsulates the merging logic for url and clientOptions.
+ *
+ * @param config - The dialect configuration (without the client property)
+ * @returns The resolved arguments to pass to the SQL constructor
+ *
+ * @remarks
+ * - If `config.url` is provided with `clientOptions`, they are merged with
+ *   `config.url` taking precedence over `clientOptions.url`
+ * - If only `config.url` is provided, the URL string is returned directly
+ * - If only `clientOptions` is provided, it's returned as-is (including any url)
+ * - If neither is provided, returns empty to use environment-based defaults
+ */
+export function resolveSqlConstructorArgs(config: {
+	url?: string;
+	clientOptions?: BunSqlClientOptions;
+}): SqlConstructorArgs {
+	if (config.url) {
+		if (config.clientOptions) {
+			// Merge URL with clientOptions, excluding clientOptions.url
+			// to ensure config.url takes precedence
+			const { url: _ignoredUrl, ...restClientOptions } = config.clientOptions;
+			return {
+				type: "options",
+				value: { url: config.url, ...restClientOptions },
+			};
+		}
+		return { type: "url-string", value: config.url };
+	}
+
+	if (config.clientOptions) {
+		return { type: "options", value: { ...config.clientOptions } };
+	}
+
+	return { type: "empty" };
+}
 
 /**
  * Bun SQL result array with additional metadata properties.
@@ -59,27 +109,21 @@ export class BunPostgresDriver implements Driver {
 			return;
 		}
 
-		if (this.#config.url) {
-			// Merge URL with clientOptions if both are provided
-			// Exclude clientOptions.url to ensure config.url takes precedence
-			if (this.#config.clientOptions) {
-				const { url: _ignoredUrl, ...restClientOptions } =
-					this.#config.clientOptions;
-				this.#client = new SQL({
-					url: this.#config.url,
-					...restClientOptions,
-				});
-			} else {
-				this.#client = new SQL(this.#config.url);
-			}
-		} else {
-			// Use default environment-based configuration; defaults to Postgres when not MySQL/SQLite
-			if (this.#config.clientOptions) {
-				// allow configuring pool, prepare, bigint, tls, etc.
-				this.#client = new SQL({ ...this.#config.clientOptions });
-			} else {
+		const args = resolveSqlConstructorArgs({
+			url: this.#config.url,
+			clientOptions: this.#config.clientOptions,
+		});
+
+		switch (args.type) {
+			case "url-string":
+				this.#client = new SQL(args.value);
+				break;
+			case "options":
+				this.#client = new SQL(args.value);
+				break;
+			case "empty":
 				this.#client = new SQL();
-			}
+				break;
 		}
 	}
 
