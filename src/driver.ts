@@ -77,6 +77,20 @@ const DEFAULT_CONNECTION_TTL_MS = 3600 * 1000;
 /** Minimum interval between prune operations (in milliseconds) */
 const PRUNE_INTERVAL_MS = 60_000;
 
+/** Valid PostgreSQL isolation levels for transaction settings */
+const VALID_ISOLATION_LEVELS: ReadonlySet<string> = new Set([
+	"serializable",
+	"repeatable read",
+	"read committed",
+	"read uncommitted",
+]);
+
+/** Valid PostgreSQL access modes for transaction settings */
+const VALID_ACCESS_MODES: ReadonlySet<string> = new Set([
+	"read only",
+	"read write",
+]);
+
 export class BunPostgresDriver implements Driver {
 	readonly #config: BunPostgresDialectConfig;
 	#client!: SQL;
@@ -200,9 +214,21 @@ export class BunPostgresDriver implements Driver {
 		if (settings.isolationLevel || settings.accessMode) {
 			let sql = "start transaction";
 			if (settings.isolationLevel) {
+				if (!VALID_ISOLATION_LEVELS.has(settings.isolationLevel)) {
+					throw new Error(
+						`Invalid isolation level: "${settings.isolationLevel}". ` +
+							`Valid values are: ${[...VALID_ISOLATION_LEVELS].join(", ")}`,
+					);
+				}
 				sql += ` isolation level ${settings.isolationLevel}`;
 			}
 			if (settings.accessMode) {
+				if (!VALID_ACCESS_MODES.has(settings.accessMode)) {
+					throw new Error(
+						`Invalid access mode: "${settings.accessMode}". ` +
+							`Valid values are: ${[...VALID_ACCESS_MODES].join(", ")}`,
+					);
+				}
 				sql += ` ${settings.accessMode}`;
 			}
 			await connection.executeQuery(CompiledQuery.raw(sql));
