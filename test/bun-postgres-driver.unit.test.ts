@@ -88,14 +88,16 @@ describe("BunPostgresDriver (unit)", () => {
 		expect(close).toHaveBeenCalledTimes(1);
 	});
 
-	test("onCreateConnection hook is called once per acquire", async () => {
+	test("onCreateConnection hook is called once per new connection, not on every acquire", async () => {
 		const unsafe = mock(async () => [] as unknown[]);
 		const release = mock(() => {});
+		// Create a single reserved object that will be reused
 		const reserved: { unsafe: typeof unsafe; release: () => void } = {
 			unsafe,
 			release,
 		};
 		const close = mock(async () => {});
+		// reserve always returns the same reserved object
 		const reserve = mock(async () => reserved);
 		const client: {
 			reserve: () => Promise<typeof reserved>;
@@ -111,9 +113,16 @@ describe("BunPostgresDriver (unit)", () => {
 			onCreateConnection,
 		});
 		await driver.init();
-		const conn = await driver.acquireConnection();
+
+		// First acquire - should call onCreateConnection
+		const conn1 = await driver.acquireConnection();
 		expect(onCreateConnection).toHaveBeenCalledTimes(1);
-		await driver.releaseConnection(conn);
+		await driver.releaseConnection(conn1);
+
+		// Second acquire of the same reserved connection - should NOT call onCreateConnection again
+		const conn2 = await driver.acquireConnection();
+		expect(onCreateConnection).toHaveBeenCalledTimes(1); // Still 1, not 2
+		await driver.releaseConnection(conn2);
 	});
 
 	test("reserve failure surfaces error", async () => {

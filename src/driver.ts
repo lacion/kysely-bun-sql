@@ -11,6 +11,7 @@ type ReservedClient = SQL & { release: () => void };
 
 export class BunPostgresDriver implements Driver {
 	readonly #config: BunPostgresDialectConfig;
+	readonly #connections = new WeakMap<ReservedClient, BunPostgresConnection>();
 	#client!: SQL;
 
 	constructor(config: BunPostgresDialectConfig = {}) {
@@ -38,10 +39,18 @@ export class BunPostgresDriver implements Driver {
 
 	async acquireConnection(): Promise<DatabaseConnection> {
 		const reserved = (await this.#client.reserve()) as ReservedClient;
-		const connection = new BunPostgresConnection(reserved);
 
-		if (this.#config.onCreateConnection) {
-			await this.#config.onCreateConnection(connection);
+		// Check if we already have a connection wrapper for this reserved client
+		let connection = this.#connections.get(reserved);
+
+		if (!connection) {
+			// This is a new connection - create wrapper and call onCreateConnection
+			connection = new BunPostgresConnection(reserved);
+			this.#connections.set(reserved, connection);
+
+			if (this.#config.onCreateConnection) {
+				await this.#config.onCreateConnection(connection);
+			}
 		}
 
 		return connection;
