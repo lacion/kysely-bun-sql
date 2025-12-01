@@ -13,16 +13,18 @@
 ---
 
 ### Table of Contents
+- [kysely-bun-sql — Kysely Postgres dialect powered by Bun SQL](#kysely-bun-sql--kysely-postgres-dialect-powered-by-bun-sql)
+- [Table of Contents](#table-of-contents)
 - [Features](#features)
 - [Requirements](#requirements)
 - [Install](#install)
 - [Quickstart](#quickstart)
 - [Usage](#usage)
-  - [Configuration options](#configuration-options)
-  - [Using an existing Bun SQL client](#using-an-existing-bun-sql-client)
-  - [Transactions](#transactions)
-  - [Raw SQL with Kysely `sql`](#raw-sql-with-kysely-sql)
-  - [Connection pooling & shutdown](#connection-pooling--shutdown)
+	- [Configuration options](#configuration-options)
+	- [Using an existing Bun SQL client](#using-an-existing-bun-sql-client)
+	- [Transactions](#transactions)
+	- [Raw SQL with Kysely `sql`](#raw-sql-with-kysely-sql)
+	- [Connection pooling \& shutdown](#connection-pooling--shutdown)
 - [API](#api)
 - [Testing](#testing)
 - [Repository overview](#repository-overview)
@@ -39,7 +41,7 @@
 - Tiny surface area: no runtime deps, ESM only
 
 ### Requirements
-- Bun ≥ 1.1.31
+- Bun ≥ 1.3
 - Kysely ≥ 0.28
 - TypeScript ≥ 5
 
