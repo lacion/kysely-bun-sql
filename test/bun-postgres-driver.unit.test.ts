@@ -1,7 +1,7 @@
 import type { SQL } from "bun";
 import { describe, expect, mock, test } from "bun:test";
 import { CompiledQuery } from "kysely";
-import { BunPostgresDriver } from "../src/driver.ts";
+import { BunPostgresDriver, resolveSqlConstructorArgs } from "../src/driver.ts";
 
 describe("BunPostgresDriver (unit)", () => {
 	// Create a minimal stub that matches the parts of Bun.SQL we use
@@ -384,5 +384,149 @@ describe("BunPostgresDriver (unit)", () => {
 
 		expect(received).toEqual(rows);
 		await driver.releaseConnection(conn);
+	});
+});
+
+describe("resolveSqlConstructorArgs", () => {
+	test("url only returns url-string type", () => {
+		const testUrl = "postgres://user:pass@localhost:5432/db";
+		const result = resolveSqlConstructorArgs({ url: testUrl });
+
+		expect(result).toEqual({ type: "url-string", value: testUrl });
+	});
+
+	test("url with clientOptions merges into options object", () => {
+		const testUrl = "postgres://user:pass@localhost:5432/db";
+		const clientOptions = { max: 20, prepare: false };
+		const result = resolveSqlConstructorArgs({ url: testUrl, clientOptions });
+
+		expect(result).toEqual({
+			type: "options",
+			value: { url: testUrl, max: 20, prepare: false },
+		});
+	});
+
+	test("config.url takes precedence over clientOptions.url", () => {
+		const configUrl = "postgres://primary@localhost/primary";
+		const clientOptionsUrl = "postgres://secondary@localhost/secondary";
+		const clientOptions = { url: clientOptionsUrl, max: 15, bigint: true };
+		const result = resolveSqlConstructorArgs({
+			url: configUrl,
+			clientOptions,
+		});
+
+		expect(result).toEqual({
+			type: "options",
+			value: { url: configUrl, max: 15, bigint: true },
+		});
+		// Verify clientOptions.url was excluded and config.url was used
+		expect(result.type).toBe("options");
+		if (result.type === "options") {
+			expect(result.value.url).toBe(configUrl);
+			expect(result.value.url).not.toBe(clientOptionsUrl);
+		}
+	});
+
+	test("clientOptions only (no url) includes clientOptions.url", () => {
+		const clientOptions = {
+			url: "postgres://user@localhost/db",
+			max: 25,
+			idleTimeout: 60,
+		};
+		const result = resolveSqlConstructorArgs({ clientOptions });
+
+		expect(result).toEqual({
+			type: "options",
+			value: clientOptions,
+		});
+		// Verify clientOptions.url IS included when config.url is not set
+		if (result.type === "options") {
+			expect(result.value.url).toBe(clientOptions.url);
+		}
+	});
+
+	test("no url or clientOptions returns empty type", () => {
+		const result = resolveSqlConstructorArgs({});
+
+		expect(result).toEqual({ type: "empty" });
+	});
+
+	test("all pool settings are preserved when merging url with clientOptions", () => {
+		const testUrl = "postgres://user:pass@localhost:5432/db";
+		const clientOptions = {
+			max: 50,
+			idleTimeout: 120,
+			maxLifetime: 3600,
+			connectionTimeout: 60,
+		};
+		const result = resolveSqlConstructorArgs({ url: testUrl, clientOptions });
+
+		expect(result).toEqual({
+			type: "options",
+			value: {
+				url: testUrl,
+				max: 50,
+				idleTimeout: 120,
+				maxLifetime: 3600,
+				connectionTimeout: 60,
+			},
+		});
+	});
+
+	test("all behavior settings are preserved when merging url with clientOptions", () => {
+		const testUrl = "postgres://user:pass@localhost:5432/db";
+		const clientOptions = {
+			prepare: false,
+			bigint: true,
+			tls: { rejectUnauthorized: false },
+		};
+		const result = resolveSqlConstructorArgs({ url: testUrl, clientOptions });
+
+		expect(result).toEqual({
+			type: "options",
+			value: {
+				url: testUrl,
+				prepare: false,
+				bigint: true,
+				tls: { rejectUnauthorized: false },
+			},
+		});
+	});
+
+	test("connection credentials from clientOptions are preserved alongside url", () => {
+		const testUrl = "postgres://user:pass@localhost:5432/db";
+		const clientOptions = {
+			hostname: "override-host",
+			port: 5433,
+			password: "new-password",
+		};
+		const result = resolveSqlConstructorArgs({ url: testUrl, clientOptions });
+
+		expect(result).toEqual({
+			type: "options",
+			value: {
+				url: testUrl,
+				hostname: "override-host",
+				port: 5433,
+				password: "new-password",
+			},
+		});
+	});
+
+	test("callbacks from clientOptions are preserved when merging with url", () => {
+		const testUrl = "postgres://user:pass@localhost:5432/db";
+		const onconnect = () => {};
+		const onclose = () => {};
+		const clientOptions = { onconnect, onclose };
+		const result = resolveSqlConstructorArgs({ url: testUrl, clientOptions });
+
+		expect(result).toEqual({
+			type: "options",
+			value: {
+				url: testUrl,
+				onconnect,
+				onclose,
+			},
+		});
 	});
 });
