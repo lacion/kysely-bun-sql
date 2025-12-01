@@ -305,6 +305,36 @@ describe("BunPostgresDriver (unit)", () => {
 		await driver.releaseConnection(conn);
 	});
 
+	test("acquireConnection throws descriptive error when pg_backend_pid returns invalid result", async () => {
+		// Mock that returns empty array for pg_backend_pid (simulating non-PostgreSQL or error)
+		const unsafe = mock(async () => [] as unknown[]);
+		const release = mock(() => {});
+		const reserved: { unsafe: typeof unsafe; release: () => void } = {
+			unsafe,
+			release,
+		};
+		const close = mock(async () => {});
+		const reserve = mock(async () => reserved);
+		const client: {
+			reserve: () => Promise<typeof reserved>;
+			close: () => Promise<void>;
+		} = {
+			reserve,
+			close,
+		};
+
+		const onCreateConnection = mock(async () => {});
+		const driver = new BunPostgresDriver({
+			client: client as unknown as SQL,
+			onCreateConnection,
+		});
+		await driver.init();
+
+		await expect(driver.acquireConnection()).rejects.toThrow(
+			"Failed to retrieve PostgreSQL backend PID",
+		);
+	});
+
 	test("reserve failure surfaces error", async () => {
 		// no-op placeholders to keep structure consistent
 		const close = mock(async () => {});

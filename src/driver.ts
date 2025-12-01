@@ -104,7 +104,16 @@ export class BunPostgresDriver implements Driver {
 
 			// Query PostgreSQL for the backend process ID to uniquely identify this connection
 			const result = await reserved.unsafe("SELECT pg_backend_pid() AS pid");
-			const pid = (result[0] as { pid: number }).pid;
+			const row = result?.[0] as { pid: number } | undefined;
+			const pid = row?.pid;
+
+			if (typeof pid !== "number") {
+				throw new Error(
+					"Failed to retrieve PostgreSQL backend PID. " +
+						"Ensure you are connected to a PostgreSQL database.",
+				);
+			}
+
 			const now = Date.now();
 
 			const existingTimestamp = this.#initializedPids.get(pid);
