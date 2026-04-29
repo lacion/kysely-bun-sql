@@ -271,11 +271,31 @@ class BunPostgresConnection implements DatabaseConnection {
 	async executeQuery<O>(compiledQuery: CompiledQuery): Promise<QueryResult<O>> {
 		const { sql, parameters } = compiledQuery;
 
+		// Transform array parameters to use sql.array() for PostgreSQL compatibility.
+		// Without this, passing a JavaScript array directly to unsafe() results in
+		// a "malformed array literal" error from PostgreSQL.
+		const hasArrayParams = parameters.some(Array.isArray);
+
+		// Feature-detect SQL#array to provide a clear error on unsupported Bun versions.
+		if (hasArrayParams && typeof (this.#client as any).array !== "function") {
+			throw new Error(
+				"Bun SQL#array is not available on this Bun version. " +
+					"Encoding array parameters requires a Bun release that supports SQL#array. " +
+					"Please upgrade Bun or avoid passing array parameters to queries.",
+			);
+		}
+
+		const sqlClient: any = this.#client;
+		const transformedParams = hasArrayParams
+			? parameters.map((param) =>
+					Array.isArray(param) ? sqlClient.array(param) : param,
+				)
+			: parameters;
 		// Use unsafe to execute the compiled SQL with $1-style bindings
 		// Bun SQL returns an array with additional properties (count, command)
 		const result = (await this.#client.unsafe(
 			sql,
-			parameters as unknown[],
+			transformedParams as unknown[],
 		)) as BunSqlResult<O>;
 
 		// Extract the command type and count from Bun's result

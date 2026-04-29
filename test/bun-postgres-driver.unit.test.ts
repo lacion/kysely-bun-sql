@@ -10,10 +10,17 @@ describe("BunPostgresDriver (unit)", () => {
 			return [{ sql, params }];
 		});
 
+		const array = mock((values: unknown[]) => ({ values, arrayType: "JSON" }));
+
 		const release = mock(() => {});
-		const reserved: { unsafe: typeof unsafe; release: () => void } = {
+		const reserved: {
+			unsafe: typeof unsafe;
+			release: () => void;
+			array: typeof array;
+		} = {
 			unsafe,
 			release,
+			array,
 		};
 
 		const close = mock(async () => {});
@@ -26,7 +33,7 @@ describe("BunPostgresDriver (unit)", () => {
 			reserve,
 			close,
 		};
-		return { client, reserved, unsafe, release, reserve, close };
+		return { client, reserved, unsafe, array, release, reserve, close };
 	}
 
 	// Helper to create a result array with command and count properties (mimics Bun.SQL result)
@@ -63,6 +70,47 @@ describe("BunPostgresDriver (unit)", () => {
 		expect(firstSql).toBe(cq.sql);
 		expect(firstParams).toEqual([...cq.parameters]);
 		expect(result.rows.length).toBe(1);
+
+		await driver.releaseConnection(conn);
+	});
+
+	test("executeQuery wraps array parameters with sql.array()", async () => {
+		const { client, unsafe, array } = createStubClient();
+		const driver = new BunPostgresDriver({ client: client as unknown as SQL });
+		await driver.init();
+		const conn = await driver.acquireConnection();
+
+		const cq = CompiledQuery.raw("insert into t (tags) values ($1)", [
+			["a", "b", "c"],
+		]);
+		await conn.executeQuery(cq);
+
+		// array() should have been called once with the array parameter
+		expect(array).toHaveBeenCalledTimes(1);
+		expect(array.mock.calls[0]).toEqual([["a", "b", "c"]]);
+
+		// The value passed to unsafe() should be the wrapped array parameter, not the raw array
+		const [, firstParams] = unsafe.mock.calls[0] as [string, unknown[]];
+		expect(firstParams[0]).toBe(array.mock.results[0].value);
+
+		await driver.releaseConnection(conn);
+	});
+
+	test("executeQuery does not wrap non-array parameters with sql.array()", async () => {
+		const { client, unsafe, array } = createStubClient();
+		const driver = new BunPostgresDriver({ client: client as unknown as SQL });
+		await driver.init();
+		const conn = await driver.acquireConnection();
+
+		const cq = CompiledQuery.raw("select $1::int as x", [123]);
+		await conn.executeQuery(cq);
+
+		// array() should NOT have been called for scalar parameters
+		expect(array).not.toHaveBeenCalled();
+
+		// The value passed to unsafe() should be the original scalar
+		const [, firstParams] = unsafe.mock.calls[0] as [string, unknown[]];
+		expect(firstParams).toEqual([123]);
 
 		await driver.releaseConnection(conn);
 	});
