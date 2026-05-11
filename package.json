@@ -40,11 +40,11 @@
 	"devDependencies": {
 		"@types/bun": "latest",
 		"@biomejs/biome": "^2.2.4",
-		"kysely": "^0.28.8"
+		"kysely": "^0.29.0"
 	},
 	"peerDependencies": {
 		"typescript": "^5",
-		"kysely": "^0.28.8"
+		"kysely": "^0.29.0"
 	},
 	"dependencies": {},
 	"publishConfig": {
